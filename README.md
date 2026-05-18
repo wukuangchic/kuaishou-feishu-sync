@@ -57,6 +57,7 @@ https://ujumedia.feishu.cn/wiki/SsVAwy1bSiDIaCkBt0ccDlftn0c?sheet=a0545c
 ```bash
 export FEISHU_APP_ID='你的飞书应用 App ID'
 export FEISHU_APP_SECRET='你的飞书应用 App Secret'
+export FEISHU_KS_URL='快手数据目标飞书表格链接'
 ```
 
 先用本地已下载文件做同步预演：
@@ -185,7 +186,7 @@ export KUAISHOU_COOKIE='从浏览器复制出来的 Cookie 字符串'
 - `--sync-feishu`：下载完成后同步到飞书
 - `--sync-file PATH`：跳过下载，直接把本地导出文件同步到飞书
 - `--sync-dry-run`：只生成同步计划，不写入飞书
-- `--feishu-url URL`：目标飞书表格链接，默认使用当前项目链接
+- `--feishu-url URL`：目标飞书表格链接，默认读取 `FEISHU_KS_URL`；兼容旧变量 `FEISHU_URL`
 - `--feishu-ca-file PATH`：指定 Feishu HTTPS CA bundle
 - `--feishu-insecure`：关闭 Feishu HTTPS 证书校验，仅用于本地证书排查
 - `--product-id ID`：产品筛选，可重复

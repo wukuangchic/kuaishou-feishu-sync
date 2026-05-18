@@ -1366,7 +1366,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--feishu-url",
-        default=os.environ.get("FEISHU_URL", DEFAULT_FEISHU_URL),
+        default=os.environ.get("FEISHU_KS_URL") or os.environ.get("FEISHU_URL", DEFAULT_FEISHU_URL),
         help="target Feishu wiki/sheet URL",
     )
     parser.add_argument("--feishu-app-id", help="Feishu app id; defaults to FEISHU_APP_ID")
