@@ -1382,7 +1382,9 @@ def recent_excel_files(download_dir: Path, started_at: float) -> list[Path]:
         {
             path
             for path in files
-            if path.is_file() and path.stat().st_mtime >= started_at - 1
+            if path.is_file()
+            and path.stat().st_mtime >= started_at - 1
+            and not path.name.startswith("~$")
         },
         key=lambda path: path.stat().st_mtime,
         reverse=True,
