@@ -119,7 +119,7 @@ export KUAISHOU_COOKIE='从浏览器复制出来的 Cookie 字符串'
 
 - `--date YYYY-MM-DD`：导出日期，默认当天
 - `--detail hour|all`：`hour` 为按小时，`all` 为汇总
-- `--download-dir PATH`：下载目录，默认 `~/Downloads`
+- `--download-dir PATH`：下载目录；默认使用 Chrome 当前机器上的配置目录
 - `--filename NAME`：指定下载文件名
 - `--product-id ID`：产品筛选，可重复
 - `--media NAME`：媒体筛选，可重复
@@ -134,7 +134,7 @@ export KUAISHOU_COOKIE='从浏览器复制出来的 Cookie 字符串'
 - `--post` 依赖 Chrome 的 AppleScript JavaScript 权限。
 - 脚本不会自动提取 Chrome Cookie 明文。
 - 如果平台接口字段变化，需要同步更新 payload 构造逻辑。
-- 如果 Chrome 下载目录不是 `~/Downloads`，请传入 `--download-dir`。
+- 如果你在 OpenClaw 或其他远端环境里运行，请把 `--download-dir` 显式指向那个环境里可写的路径，不要写你本机 Mac 的 `~/Downloads`。
 
 ## 后续开发方向
 

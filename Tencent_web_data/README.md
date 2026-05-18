@@ -2,11 +2,7 @@
 
 从已登录的 Chrome 腾讯广告账户页拉取当天分页账户数据，并同步到飞书表格。
 
-目标页：
-
-```text
-https://ad.qq.com/cm/account
-```
+首次使用时，请先在 Chrome 里手动登录腾讯广告账户页 `https://ad.qq.com/cm/account`。
 
 目标飞书表格通过 `.env` 中的 `FEISHU_TENCENT_URL` 配置，仓库不写死具体链接。
 

@@ -21,6 +21,17 @@ v1 已留档在：
 archive/v1-post-download/
 ```
 
+## 首次使用
+
+第一次运行前，请先在 Chrome 里手动登录这两个站点：
+
+- 快手趋势分析页：`https://ugagent-partner.kuaishou.com/data/center/analyse/agent`
+- 腾讯广告账户页：`https://ad.qq.com/cm/account`
+
+后续脚本会复用 Chrome 当前登录态；如果登录失效，再回到对应页面重新登录即可。
+
+如果你是在 OpenClaw 或其他远端环境里运行，下载目录必须是那个环境里 Chrome 真正能写入的本地路径，不是你这台 Mac 的 `~/Downloads`。
+
 这个脚本用于导出快手信息流代理平台「趋势分析」页面的实时表格数据。当前推荐模式是让已登录的 Chrome 页面在后台发起同源 POST 下载，脚本不读取 Chrome Cookie 明文；如果登录态失效，再把目标页打开到前台，由使用者手动登录后重试。
 
 ## 当前推荐用法
@@ -190,7 +201,7 @@ export KUAISHOU_COOKIE='从浏览器复制出来的 Cookie 字符串'
 
 - `--date YYYY-MM-DD`：导出日期，默认当天
 - `--detail hour|all`：`hour` 为按小时，`all` 为汇总
-- `--download-dir PATH`：下载目录，默认 `~/Downloads`
+- `--download-dir PATH`：下载目录；默认使用 Chrome 当前机器上的配置目录
 - `--filename NAME`：指定下载文件名
 - `--sync-feishu`：下载完成后同步到飞书
 - `--sync-file PATH`：跳过下载，直接把本地导出文件同步到飞书
@@ -214,7 +225,7 @@ export KUAISHOU_COOKIE='从浏览器复制出来的 Cookie 字符串'
 - 飞书应用需要具备表格读写权限，并且目标文档需要允许该应用访问。
 - 脚本默认会尝试使用本机 `certifi` CA bundle 访问 Feishu OpenAPI。
 - 如果平台接口字段变化，需要同步更新 payload 构造逻辑。
-- 脚本会尝试读取 Chrome 配置中的默认下载目录；如果检测不准，请传入 `--download-dir`。
+- 脚本会尝试读取 Chrome 配置中的默认下载目录；如果你在 OpenClaw 或其他远端环境里运行，请把 `--download-dir` 显式指向那个环境里可写的路径，不要写你本机 Mac 的 `~/Downloads`。
 
 ## 后续开发方向
 
