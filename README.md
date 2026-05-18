@@ -1,6 +1,18 @@
-# 快手趋势分析实时表格导出脚本
+# 广告数据同步脚本
 
 当前开发版本脚本：`kuaishou_realtime_export.py`
+
+新增腾讯广告账户数据同步程序：
+
+```text
+Tencent_web_data/tencent_web_data.py
+```
+
+腾讯程序说明见：
+
+```text
+Tencent_web_data/README.md
+```
 
 v1 已留档在：
 
