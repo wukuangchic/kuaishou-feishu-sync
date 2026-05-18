@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Fetch Tencent Ads account data from a logged-in Chrome tab and sync to Feishu.
+"""Fetch Tencent Ads account data and sync it to Feishu.
 
-The script asks the existing Chrome tab to issue same-origin POST requests, so
-Chrome carries the live login state without this program exporting cookie text.
+On macOS, the script can ask an existing Chrome tab to issue same-origin POST
+requests so Chrome carries the live login state without exporting cookie text.
+On Linux and Windows, or when requested explicitly, it can also run direct HTTP
+POST requests with a supplied Cookie header.
 
-Prerequisite in Chrome on macOS:
+Prerequisite for the Chrome-tab mode in Chrome on macOS:
   View -> Developer -> Allow JavaScript from Apple Events
 """
 
@@ -19,6 +21,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+import urllib.error
+import urllib.request
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -46,8 +50,13 @@ from kuaishou_realtime_export import (  # noqa: E402
 
 
 DEFAULT_TARGET_URL = "https://ad.qq.com/cm/account"
+DEFAULT_TARGET_ORIGIN = "https://ad.qq.com"
 DEFAULT_FEISHU_URL = ""
 DEFAULT_FEISHU_BASE_URL = "https://open.feishu.cn"
+DEFAULT_DIRECT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+)
 DEFAULT_DYNAMIC_FIELDS = [
     "marketing_content",
     "status_text",
@@ -135,6 +144,182 @@ ENABLE_STATUS = {
     0: "启用中",
     1: "未启用",
 }
+
+
+def normalize_cookie_header(value: str) -> str:
+    cookie = value.strip()
+    if cookie.lower().startswith("cookie:"):
+        cookie = cookie.split(":", 1)[1].strip()
+    return cookie
+
+
+def get_direct_cookie(args: argparse.Namespace) -> str:
+    if getattr(args, "cookie", ""):
+        return normalize_cookie_header(args.cookie)
+    if getattr(args, "cookie_file", ""):
+        return normalize_cookie_header(Path(args.cookie_file).expanduser().read_text().strip())
+    env_cookie = os.environ.get("TENCENT_COOKIE", "")
+    if env_cookie:
+        return normalize_cookie_header(env_cookie)
+    raise ChromeAutomationError(
+        "Direct Tencent fetch needs a Cookie header. Set TENCENT_COOKIE or pass --cookie-file."
+    )
+
+
+def to_millis(value: str, end_of_day: bool) -> int:
+    local_tz = dt.timezone(dt.timedelta(hours=8))
+    parsed = dt.datetime.strptime(value, "%Y-%m-%d")
+    hour = 23 if end_of_day else 0
+    minute = 59 if end_of_day else 0
+    second = 59 if end_of_day else 0
+    localized = parsed.replace(hour=hour, minute=minute, second=second, microsecond=0, tzinfo=local_tz)
+    return int(localized.timestamp() * 1000)
+
+
+def build_tencent_filter_data(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "account_source": "GDT_PLATFROM",
+        "filter_empty_data": 1,
+        "data_version": "VERSION_ALL",
+        "keyAccount": False,
+        "caliberType": "REQUEST_TIME",
+        "dateRange": [args.date, args.date],
+    }
+
+
+def build_tencent_request_body(
+    filter_data: dict[str, Any],
+    page: int,
+    page_size: int,
+    dynamic_fields: list[str],
+    column_config_id: int,
+    user_id: Any,
+) -> dict[str, Any]:
+    order = filter_data.get("order") or {}
+    date_range = filter_data.get("dateRange") or [filter_data.get("date"), filter_data.get("date")]
+    start_date = date_range[0] if date_range else ""
+    end_date = date_range[1] if len(date_range) > 1 else start_date
+    body = dict(filter_data)
+    for key in ("account_id", "order", "keyAccount", "dateRange", "caliberType"):
+        body.pop(key, None)
+    body["page"] = page
+    body["page_size"] = page_size
+    body["start_date_millons"] = to_millis(str(start_date), False)
+    body["end_date_millons"] = to_millis(str(end_date), True)
+    body["time_line"] = filter_data.get("caliberType") or "REQUEST_TIME"
+    if filter_data.get("keyAccount"):
+        body["is_top"] = 1
+    body["new_source"] = 1
+    if order.get("type"):
+        body["sort_seq"] = str(order.get("type")).lower()
+    if order.get("field"):
+        body["sort_field"] = order.get("field")
+    body["dynamic_field_list"] = dynamic_fields
+    body["columnConfigId"] = column_config_id
+    body["user_id"] = user_id
+    return body
+
+
+def direct_request_json(
+    path: str,
+    *,
+    cookie: str,
+    user_agent: str,
+    timeout: float,
+    body: dict[str, Any] | None = None,
+    method: str = "POST",
+) -> dict[str, Any]:
+    url = f"{DEFAULT_TARGET_ORIGIN}/tap/v1{path}"
+    data = None if method == "GET" else json.dumps(body or {}, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json; charset=utf-8",
+        "Cookie": cookie,
+        "Origin": DEFAULT_TARGET_ORIGIN,
+        "Referer": DEFAULT_TARGET_URL,
+        "User-Agent": user_agent,
+    }
+    request = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            content_type = response.headers.get("content-type", "")
+            response_text = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise ChromeAutomationError(f"HTTP {exc.code} from {path}: {detail[:1200]}") from exc
+    except urllib.error.URLError as exc:
+        raise ChromeAutomationError(f"Direct Tencent request failed for {path}: {exc}") from exc
+
+    try:
+        payload = json.loads(response_text or "{}")
+    except json.JSONDecodeError as exc:
+        raise ChromeAutomationError(
+            f"Non-JSON response from {path} ({content_type}): {response_text[:1200]}"
+        ) from exc
+
+    if payload.get("code", 0) not in (0, None):
+        raise ChromeAutomationError(f"API error from {path}: {json.dumps(payload, ensure_ascii=False)[:1200]}")
+    return payload.get("data") or {}
+
+
+def fetch_tencent_rows_direct(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    cookie = get_direct_cookie(args)
+    login_info = direct_request_json(
+        "/login/login_info",
+        cookie=cookie,
+        user_agent=args.user_agent,
+        timeout=args.timeout,
+        body={},
+    )
+    user_id = login_info.get("user_id") or login_info.get("login_user_id")
+    if not user_id:
+        raise ChromeAutomationError(
+            "Tencent direct mode got no user_id from /login/login_info. The Cookie header is probably invalid."
+        )
+
+    dynamic_fields = DEFAULT_DYNAMIC_FIELDS[:]
+    column_config_id = 0
+    filter_data = build_tencent_filter_data(args)
+    rows: list[dict[str, Any]] = []
+
+    first_body = build_tencent_request_body(filter_data, 1, args.page_size, dynamic_fields, column_config_id, user_id)
+    first_data = direct_request_json(
+        "/account_daily_report/account_list",
+        cookie=cookie,
+        user_agent=args.user_agent,
+        timeout=args.timeout,
+        body=first_body,
+    )
+    rows.extend(first_data.get("list") or [])
+
+    page_info = first_data.get("page_info") or {}
+    total_pages = int(page_info.get("total_page") or 1)
+    capped_pages = min(total_pages, args.max_pages)
+    for page in range(2, capped_pages + 1):
+        body = build_tencent_request_body(filter_data, page, args.page_size, dynamic_fields, column_config_id, user_id)
+        data = direct_request_json(
+            "/account_daily_report/account_list",
+            cookie=cookie,
+            user_agent=args.user_agent,
+            timeout=args.timeout,
+            body=body,
+        )
+        rows.extend(data.get("list") or [])
+
+    status = {
+        "done": True,
+        "ok": True,
+        "rowCount": len(rows),
+        "pageInfo": page_info,
+        "totalPages": total_pages,
+        "fetchedPages": capped_pages,
+        "dateRange": [args.date, args.date],
+        "columnConfigId": column_config_id,
+        "columnConfigName": "default_fields",
+        "dynamicFields": dynamic_fields,
+        "finishedAt": dt.datetime.now().isoformat(),
+    }
+    return rows, status
 
 
 def start_tencent_fetch_js(args: argparse.Namespace) -> str:
@@ -677,6 +862,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sync-dry-run", action="store_true", help="build Feishu plan without writing")
     parser.add_argument("--no-sync", action="store_true", help="only fetch Tencent data; do not sync Feishu")
     parser.add_argument(
+        "--direct-post",
+        action="store_true",
+        help="fetch by direct Python POST without controlling Chrome; useful on Linux/Windows",
+    )
+    parser.add_argument(
         "--feishu-url",
         default=os.environ.get("FEISHU_TENCENT_URL", DEFAULT_FEISHU_URL),
         help="target Feishu wiki/sheet URL; required unless FEISHU_TENCENT_URL is set",
@@ -694,6 +884,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="disable Feishu HTTPS certificate verification; use only for local certificate debugging",
     )
+    parser.add_argument(
+        "--cookie",
+        help="Cookie header for --direct-post; prefer TENCENT_COOKIE or --cookie-file",
+    )
+    parser.add_argument("--cookie-file", help="file containing the Cookie header for --direct-post")
+    parser.add_argument(
+        "--user-agent",
+        default=DEFAULT_DIRECT_USER_AGENT,
+        help="User-Agent for --direct-post",
+    )
     return parser
 
 
@@ -707,7 +907,11 @@ def main(argv: list[str] | None = None) -> int:
         raise ChromeAutomationError("--login-retries must be zero or greater")
     args.fetch_hour = dt.datetime.now().hour
 
-    rows, status = fetch_tencent_rows(args)
+    use_direct_post = args.direct_post or sys.platform != "darwin"
+    if use_direct_post:
+        rows, status = fetch_tencent_rows_direct(args)
+    else:
+        rows, status = fetch_tencent_rows(args)
     print(
         "Tencent fetch finished: "
         f"{len(rows)} rows, pages {status.get('fetchedPages')}/{status.get('totalPages')}, "

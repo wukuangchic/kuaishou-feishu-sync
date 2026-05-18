@@ -23,12 +23,14 @@ archive/v1-post-download/
 
 ## 首次使用
 
-第一次运行前，请先在 Chrome 里手动登录这两个站点：
+第一次运行前，按你的运行平台准备登录态：
 
-- 快手趋势分析页：`https://ugagent-partner.kuaishou.com/data/center/analyse/agent`
-- 腾讯广告账户页：`https://ad.qq.com/cm/account`
+- macOS 上，先在 Chrome 里手动登录这两个站点，脚本会复用当前登录态
+  - 快手趋势分析页：`https://ugagent-partner.kuaishou.com/data/center/analyse/agent`
+  - 腾讯广告账户页：`https://ad.qq.com/cm/account`
+- Linux / Windows 上，快手可用直连 Cookie 模式，腾讯也可以用直连 Cookie 模式；这时不需要控制 Chrome，但需要提供有效 Cookie
 
-后续脚本会复用 Chrome 当前登录态；如果登录失效，再回到对应页面重新登录即可。
+如果使用 Chrome tab 模式，登录失效后再回到对应页面重新登录即可。
 
 如果你是在 OpenClaw 或其他远端环境里运行，下载目录必须是那个环境里 Chrome 真正能写入的本地路径，不是你这台 Mac 的 `~/Downloads`。
 
