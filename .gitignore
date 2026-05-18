@@ -1,0 +1,7 @@
+*.env
+.env*
+.DS_Store
+kuaishou_cookie.txt
+feishu_cookie.txt
+feishu_secret.txt
+__pycache__/
