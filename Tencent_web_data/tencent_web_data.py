@@ -457,7 +457,7 @@ def normalize_key_value(header: str, value: Any) -> str:
             hour = int(value)
             if abs(float(value) - hour) < 1e-9 and 0 <= hour <= 23:
                 return str(hour)
-        text = str(value or "").strip()
+        text = "" if value is None else str(value).strip()
         if not text:
             return ""
         normalized = text.replace(",", "")
@@ -473,7 +473,7 @@ def normalize_key_value(header: str, value: Any) -> str:
         if parsed:
             return str(parsed.hour)
         return text
-    return str(value or "").strip()
+    return "" if value is None else str(value).strip()
 
 
 def coerce_feishu_value(header: str, value: Any) -> Any:
@@ -499,7 +499,7 @@ def coerce_feishu_value(header: str, value: Any) -> Any:
             return int(float(normalized))
         return value
     if header in TEXT_HEADERS:
-        return str(value or "")
+        return str(value).strip()
     return to_number_or_text(value)
 
 

@@ -887,7 +887,7 @@ def normalize_key_value(header: str, value: Any) -> str:
             hour = int(value)
             if abs(float(value) - hour) < 1e-9 and 0 <= hour <= 23:
                 return str(hour)
-        text = str(value or "").strip()
+        text = "" if value is None else str(value).strip()
         if not text:
             return ""
         normalized = text.replace(",", "")
@@ -903,11 +903,13 @@ def normalize_key_value(header: str, value: Any) -> str:
         if parsed:
             return str(parsed.hour)
         return text
-    return str(value or "").strip()
+    return "" if value is None else str(value).strip()
 
 
 def coerce_feishu_cell_value(header: str, value: Any) -> Any:
-    text = str(value or "").strip()
+    if value is None:
+        return ""
+    text = str(value).strip()
     if text == "":
         return text
     if header in DATE_HEADERS:
@@ -1144,7 +1146,7 @@ class FeishuSheetClient:
             f"/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values/{encoded_range}",
         )
         values = payload.get("data", {}).get("valueRange", {}).get("values") or []
-        return [[str(cell or "").strip() for cell in row] for row in values]
+        return [["" if cell is None else str(cell).strip() for cell in row] for row in values]
 
     def insert_dimension(
         self,
