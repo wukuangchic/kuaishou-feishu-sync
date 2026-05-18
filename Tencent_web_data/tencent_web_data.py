@@ -34,9 +34,11 @@ from kuaishou_realtime_export import (  # noqa: E402
     find_tab,
     get_grid_count,
     load_dotenv,
+    move_header_after,
     normalize_existing_headers,
     parse_datetime_text,
     spreadsheet_serial_to_datetime,
+    sync_key_for_record,
     trim_trailing_empty_rows,
     wait_for_page_ready,
     reload_tab,
@@ -61,8 +63,9 @@ DEFAULT_DYNAMIC_FIELDS = [
     "is_rta",
     "account_alias",
 ]
-SYNC_KEY_HEADERS = ("日期", "账户ID")
+SYNC_KEY_HEADERS = ("日期", "小时", "账户ID")
 DATE_HEADERS = {"日期"}
+HOUR_HEADERS = {"小时"}
 TEXT_HEADERS = {
     "账户ID",
     "账户名称",
@@ -79,6 +82,7 @@ TEXT_HEADERS = {
 
 BASE_HEADERS = [
     "日期",
+    "小时",
     "账户ID",
     "账户名称",
     "账户标签",
@@ -381,9 +385,15 @@ def status_text(row: dict[str, Any]) -> str:
     return "" if merged_status in (None, "") else str(merged_status)
 
 
-def normalize_record(row: dict[str, Any], report_date: str, dynamic_fields: list[str]) -> dict[str, Any]:
+def normalize_record(
+    row: dict[str, Any],
+    report_date: str,
+    dynamic_fields: list[str],
+    fetch_hour: int,
+) -> dict[str, Any]:
     record: dict[str, Any] = {
         "日期": datetime_to_spreadsheet_serial(dt.datetime.strptime(report_date, "%Y-%m-%d")),
+        "小时": int(fetch_hour),
         "账户ID": str(row.get("account_id") or ""),
         "账户名称": row.get("corporation_name") or row.get("account_name") or "",
         "账户标签": row.get("account_alias") or "",
@@ -426,10 +436,12 @@ def build_records(rows: list[dict[str, Any]], status: dict[str, Any], args: argp
         header = DYNAMIC_FIELD_HEADERS.get(field)
         if header and header not in headers:
             headers.append(header)
-    records = [normalize_record(row, args.date, dynamic_fields) for row in rows]
-    deduped: dict[tuple[str, str], dict[str, Any]] = {}
+    move_header_after(headers, "小时", "日期")
+    fetch_hour = int(getattr(args, "fetch_hour", dt.datetime.now().hour))
+    records = [normalize_record(row, args.date, dynamic_fields, fetch_hour) for row in rows]
+    deduped: dict[tuple[str, ...], dict[str, Any]] = {}
     for record in records:
-        key = tuple(normalize_key_value(header, record.get(header, "")) for header in SYNC_KEY_HEADERS)
+        key = sync_key_for_record(record, SYNC_KEY_HEADERS)
         if all(key):
             deduped[key] = record
     return headers, list(deduped.values())
@@ -440,6 +452,27 @@ def normalize_key_value(header: str, value: Any) -> str:
         parsed = parse_datetime_text(value) or spreadsheet_serial_to_datetime(value)
         if parsed:
             return parsed.strftime("%Y-%m-%d")
+    if header in HOUR_HEADERS:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            hour = int(value)
+            if abs(float(value) - hour) < 1e-9 and 0 <= hour <= 23:
+                return str(hour)
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        normalized = text.replace(",", "")
+        if re.fullmatch(r"\d+", normalized):
+            hour = int(normalized)
+            if 0 <= hour <= 23:
+                return str(hour)
+        if re.fullmatch(r"(?:\d+\.\d*|\d*\.\d+)", normalized):
+            hour = int(float(normalized))
+            if 0 <= hour <= 23:
+                return str(hour)
+        parsed = parse_datetime_text(text) or spreadsheet_serial_to_datetime(text)
+        if parsed:
+            return str(parsed.hour)
+        return text
     return str(value or "").strip()
 
 
@@ -453,18 +486,34 @@ def coerce_feishu_value(header: str, value: Any) -> Any:
         if parsed:
             return datetime_to_spreadsheet_serial(parsed)
         return value
+    if header in HOUR_HEADERS:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return int(value)
+        parsed = parse_datetime_text(value)
+        if parsed:
+            return parsed.hour
+        normalized = str(value or "").strip().replace(",", "")
+        if re.fullmatch(r"-?\d+", normalized):
+            return int(normalized)
+        if re.fullmatch(r"-?(?:\d+\.\d*|\d*\.\d+)", normalized):
+            return int(float(normalized))
+        return value
     if header in TEXT_HEADERS:
         return str(value or "")
     return to_number_or_text(value)
 
 
-def build_existing_index(existing_values: list[list[str]], headers: list[str]) -> dict[tuple[str, str], int]:
-    index: dict[tuple[str, str], int] = {}
+def build_existing_index(
+    existing_values: list[list[str]],
+    headers: list[str],
+    key_headers: tuple[str, ...] = SYNC_KEY_HEADERS,
+) -> dict[tuple[str, ...], int]:
+    index: dict[tuple[str, ...], int] = {}
     if not headers:
         return index
     for row_offset, row in enumerate(existing_values[1:], start=2):
         record = {header: row[col] if col < len(row) else "" for col, header in enumerate(headers)}
-        key = tuple(normalize_key_value(header, record.get(header, "")) for header in SYNC_KEY_HEADERS)
+        key = sync_key_for_record(record, key_headers)
         if all(key):
             index[key] = row_offset
     return index
@@ -503,15 +552,19 @@ def compact_update_ranges(sheet_id: str, max_col: int, row_values: list[tuple[in
 def apply_date_style(client: FeishuSheetClient, spreadsheet_token: str, sheet_id: str, headers: list[str], max_row: int) -> None:
     if max_row < 2 or "日期" not in headers:
         return
-    col = column_letter(headers.index("日期") + 1)
-    try:
-        client.set_cell_style(
-            spreadsheet_token,
-            f"{sheet_id}!{col}2:{col}{max_row}",
-            {"formatter": "yyyy/MM/dd"},
-        )
-    except ChromeAutomationError as exc:
-        print(f"WARNING: date style update failed: {exc}")
+    styles = {"日期": "yyyy/MM/dd", "小时": "0"}
+    for header, formatter in styles.items():
+        if header not in headers:
+            continue
+        col = column_letter(headers.index(header) + 1)
+        try:
+            client.set_cell_style(
+                spreadsheet_token,
+                f"{sheet_id}!{col}2:{col}{max_row}",
+                {"formatter": formatter},
+            )
+        except ChromeAutomationError as exc:
+            print(f"WARNING: column style update failed for {header}: {exc}")
 
 
 def sync_records_to_feishu(headers: list[str], records: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, int]:
@@ -531,6 +584,7 @@ def sync_records_to_feishu(headers: list[str], records: list[dict[str, Any]], ar
     for key_header in SYNC_KEY_HEADERS:
         if key_header not in final_headers:
             final_headers.append(key_header)
+    move_header_after(final_headers, "小时", "日期")
 
     max_col = len(final_headers)
     existing_index = build_existing_index(existing_values, final_headers)
@@ -538,7 +592,7 @@ def sync_records_to_feishu(headers: list[str], records: list[dict[str, Any]], ar
     appends: list[list[Any]] = []
     append_start_row = max(len(existing_values) + 1, 2)
     for record in records:
-        key = tuple(normalize_key_value(header, record.get(header, "")) for header in SYNC_KEY_HEADERS)
+        key = sync_key_for_record(record, SYNC_KEY_HEADERS)
         values = [coerce_feishu_value(header, record.get(header, "")) for header in final_headers]
         if key in existing_index:
             updates.append((existing_index[key], values))
@@ -651,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         raise ChromeAutomationError("--date must be in YYYY-MM-DD format") from exc
     if args.login_retries < 0:
         raise ChromeAutomationError("--login-retries must be zero or greater")
+    args.fetch_hour = dt.datetime.now().hour
 
     rows, status = fetch_tencent_rows(args)
     print(
@@ -662,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
         save_json(args.output_json, rows, status)
 
     headers, records = build_records(rows, status, args)
-    print(f"Prepared {len(records)} deduped Feishu rows with key 日期 + 账户ID.")
+    print(f"Prepared {len(records)} deduped Feishu rows with key 日期 + 小时 + 账户ID.")
     if records:
         sample = {key: records[0].get(key, "") for key in headers[:10]}
         print("Sample row:")

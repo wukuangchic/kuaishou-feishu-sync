@@ -39,11 +39,11 @@ DEFAULT_FEISHU_BASE_URL = "https://open.feishu.cn"
 EXCEL_PATTERNS = ("*.xlsx", "*.xls", "*.csv")
 REALTIME_QUOTA_IDS = [11, 12, 13, 16]
 EXPORT_HEADER_ALIASES = {
-    "时间": "日期",
     "渠道": "渠道号",
 }
-SYNC_KEY_HEADERS = ("日期", "渠道号")
+SYNC_KEY_HEADERS = ("日期", "小时", "渠道号")
 DATE_HEADERS = {"日期"}
+HOUR_HEADERS = {"小时"}
 TEXT_HEADERS = {"渠道号", "产品"}
 SPREADSHEET_EPOCH = dt.datetime(1899, 12, 30)
 
@@ -869,14 +869,40 @@ def spreadsheet_serial_to_datetime(value: Any) -> dt.datetime | None:
     return SPREADSHEET_EPOCH + dt.timedelta(days=whole_days, seconds=seconds)
 
 
+def split_datetime_value(value: Any) -> tuple[Any, Any]:
+    parsed = parse_datetime_text(value) or spreadsheet_serial_to_datetime(value)
+    if not parsed:
+        return "", ""
+    date_only = parsed.replace(hour=0, minute=0, second=0, microsecond=0)
+    return datetime_to_spreadsheet_serial(date_only), parsed.hour
+
+
 def normalize_key_value(header: str, value: Any) -> str:
     if header in DATE_HEADERS:
         parsed = parse_datetime_text(value) or spreadsheet_serial_to_datetime(value)
         if parsed:
-            parsed = snap_datetime_to_hour(parsed)
-            if parsed.hour or parsed.minute or parsed.second:
-                return parsed.strftime("%Y-%m-%d %H:%M")
             return parsed.strftime("%Y-%m-%d")
+    if header in HOUR_HEADERS:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            hour = int(value)
+            if abs(float(value) - hour) < 1e-9 and 0 <= hour <= 23:
+                return str(hour)
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        normalized = text.replace(",", "")
+        if re.fullmatch(r"\d+", normalized):
+            hour = int(normalized)
+            if 0 <= hour <= 23:
+                return str(hour)
+        if re.fullmatch(r"(?:\d+\.\d*|\d*\.\d+)", normalized):
+            hour = int(float(normalized))
+            if 0 <= hour <= 23:
+                return str(hour)
+        parsed = parse_datetime_text(text) or spreadsheet_serial_to_datetime(text)
+        if parsed:
+            return str(parsed.hour)
+        return text
     return str(value or "").strip()
 
 
@@ -885,9 +911,23 @@ def coerce_feishu_cell_value(header: str, value: Any) -> Any:
     if text == "":
         return text
     if header in DATE_HEADERS:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value
         parsed = parse_datetime_text(text)
         if parsed:
             return datetime_to_spreadsheet_serial(parsed)
+        return text
+    if header in HOUR_HEADERS:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return int(value)
+        parsed = parse_datetime_text(text)
+        if parsed:
+            return parsed.hour
+        normalized = text.replace(",", "")
+        if re.fullmatch(r"-?\d+", normalized):
+            return int(normalized)
+        if re.fullmatch(r"-?(?:\d+\.\d*|\d*\.\d+)", normalized):
+            return int(float(normalized))
         return text
     if header in TEXT_HEADERS:
         return text
@@ -899,7 +939,42 @@ def coerce_feishu_cell_value(header: str, value: Any) -> Any:
     return text
 
 
-def read_export_table(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+def sync_key_for_record(record: dict[str, Any], key_headers: tuple[str, ...] = SYNC_KEY_HEADERS) -> tuple[str, ...]:
+    parsed_date = None
+    date_value = record.get("日期", "")
+    hour_value = record.get("小时", "")
+    if "日期" in key_headers:
+        parsed_date = parse_datetime_text(date_value) or spreadsheet_serial_to_datetime(date_value)
+    key_parts: list[str] = []
+    for header in key_headers:
+        if header == "日期":
+            if parsed_date:
+                key_parts.append(parsed_date.strftime("%Y-%m-%d"))
+            else:
+                key_parts.append(normalize_key_value(header, date_value))
+        elif header == "小时":
+            if hour_value not in ("", None):
+                key_parts.append(normalize_key_value(header, hour_value))
+            elif parsed_date:
+                key_parts.append(str(parsed_date.hour))
+            else:
+                key_parts.append("")
+        else:
+            key_parts.append(normalize_key_value(header, record.get(header, "")))
+    return tuple(key_parts)
+
+
+def move_header_after(headers: list[str], header: str, after_header: str) -> None:
+    if header not in headers:
+        return
+    headers.remove(header)
+    if after_header in headers:
+        headers.insert(headers.index(after_header) + 1, header)
+    else:
+        headers.append(header)
+
+
+def read_export_table(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
     if not path.exists():
         raise ChromeAutomationError(f"Export file does not exist: {path}")
     rows = read_xlsx_rows(path) if is_ooxml_file(path) else read_csv_rows(path)
@@ -907,17 +982,39 @@ def read_export_table(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     if not rows:
         raise ChromeAutomationError(f"Export file has no rows: {path}")
     headers = [normalize_header(cell) for cell in rows[0]]
+    source_time_header = None
+    if "小时" not in headers:
+        for candidate in ("时间", "日期"):
+            if candidate in headers:
+                source_time_header = candidate
+                break
+    if source_time_header:
+        transformed_headers: list[str] = []
+        for header in headers:
+            if header == source_time_header:
+                transformed_headers.extend(["日期", "小时"])
+            else:
+                transformed_headers.append(header)
+        headers = transformed_headers
     if len(headers) != len(set(headers)):
         raise ChromeAutomationError(f"Export file has duplicate headers after normalization: {headers}")
     missing_keys = [header for header in SYNC_KEY_HEADERS if header not in headers]
     if missing_keys:
         raise ChromeAutomationError(f"Export file missing key headers: {', '.join(missing_keys)}")
 
-    records: "OrderedDict[tuple[str, str], dict[str, str]]" = OrderedDict()
+    records: "OrderedDict[tuple[str, ...], dict[str, Any]]" = OrderedDict()
     for row in rows[1:]:
         values = [str(cell or "").strip() for cell in row]
-        record = {header: values[index] if index < len(values) else "" for index, header in enumerate(headers)}
-        key = tuple(record.get(header, "") for header in SYNC_KEY_HEADERS)
+        record: dict[str, Any] = {}
+        for index, header in enumerate(rows[0]):
+            normalized_header = normalize_header(header)
+            if source_time_header and normalized_header == source_time_header:
+                date_value, hour_value = split_datetime_value(values[index] if index < len(values) else "")
+                record["日期"] = date_value
+                record["小时"] = hour_value
+                continue
+            record[normalized_header] = values[index] if index < len(values) else ""
+        key = sync_key_for_record(record)
         if not all(key):
             continue
         records[key] = record
@@ -1129,13 +1226,17 @@ def trim_trailing_empty_rows(values: list[list[str]]) -> list[list[str]]:
     return trimmed
 
 
-def build_existing_index(existing_values: list[list[str]], headers: list[str]) -> dict[tuple[str, str], int]:
-    index: dict[tuple[str, str], int] = {}
+def build_existing_index(
+    existing_values: list[list[str]],
+    headers: list[str],
+    key_headers: tuple[str, ...] = SYNC_KEY_HEADERS,
+) -> dict[tuple[str, ...], int]:
+    index: dict[tuple[str, ...], int] = {}
     if not headers:
         return index
     for row_offset, row in enumerate(existing_values[1:], start=2):
         record = {header: row[col] if col < len(row) else "" for col, header in enumerate(headers)}
-        key = tuple(normalize_key_value(header, record.get(header, "")) for header in SYNC_KEY_HEADERS)
+        key = sync_key_for_record(record, key_headers)
         if all(key):
             index[key] = row_offset
     return index
@@ -1185,7 +1286,8 @@ def apply_date_column_styles(
 ) -> None:
     if max_row < 2:
         return
-    for header in DATE_HEADERS:
+    style_map = {"日期": "yyyy/MM/dd", "小时": "0"}
+    for header, formatter in style_map.items():
         if header not in headers:
             continue
         col = column_letter(headers.index(header) + 1)
@@ -1193,10 +1295,10 @@ def apply_date_column_styles(
             client.set_cell_style(
                 spreadsheet_token,
                 f"{sheet_id}!{col}2:{col}{max_row}",
-                {"formatter": "yyyy/MM/dd HH:mm:ss"},
+                {"formatter": formatter},
             )
         except ChromeAutomationError as exc:
-            print(f"WARNING: date style update failed for {header}: {exc}")
+            print(f"WARNING: column style update failed for {header}: {exc}")
 
 
 def sync_export_file_to_feishu(path: Path, args: argparse.Namespace) -> dict[str, int]:
@@ -1218,19 +1320,17 @@ def sync_export_file_to_feishu(path: Path, args: argparse.Namespace) -> dict[str
     for key_header in SYNC_KEY_HEADERS:
         if key_header not in final_headers:
             final_headers.append(key_header)
+    move_header_after(final_headers, "小时", "日期")
 
     max_col = len(final_headers)
     existing_index = build_existing_index(existing_values, final_headers)
-    updates: list[tuple[int, list[str]]] = []
-    appends: list[list[str]] = []
+    updates: list[tuple[int, list[Any]]] = []
+    appends: list[list[Any]] = []
     append_start_row = max(len(existing_values) + 1, 2)
 
     for record in export_records:
-        key = tuple(normalize_key_value(header, record.get(header, "")) for header in SYNC_KEY_HEADERS)
-        values = [
-            coerce_feishu_cell_value(header, record.get(header, ""))
-            for header in final_headers
-        ]
+        key = sync_key_for_record(record)
+        values = [coerce_feishu_cell_value(header, record.get(header, "")) for header in final_headers]
         if key in existing_index:
             updates.append((existing_index[key], values))
         else:
