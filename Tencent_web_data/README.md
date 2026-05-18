@@ -8,11 +8,7 @@
 https://ad.qq.com/cm/account
 ```
 
-目标飞书表格默认读取 `.env` 中的 `FEISHU_TENCENT_URL`：
-
-```text
-https://ujumedia.feishu.cn/wiki/SsVAwy1bSiDIaCkBt0ccDlftn0c?sheet=i7McmQ
-```
+目标飞书表格通过 `.env` 中的 `FEISHU_TENCENT_URL` 配置，仓库不写死具体链接。
 
 ## 运行
 
@@ -25,7 +21,7 @@ https://ujumedia.feishu.cn/wiki/SsVAwy1bSiDIaCkBt0ccDlftn0c?sheet=i7McmQ
 执行：
 
 ```bash
-cd "/Users/wukuangchicsmacbook/Library/Mobile Documents/com~apple~CloudDocs/Downloads/腾讯时报测试"
+cd <repo-root>
 ./Tencent_web_data/tencent_web_data.py
 ```
 
@@ -47,7 +43,7 @@ cd "/Users/wukuangchicsmacbook/Library/Mobile Documents/com~apple~CloudDocs/Down
 
 ## 配置
 
-`.env` 中建议包含：
+`.env` 中建议包含，或直接复制根目录的 `.env.example`：
 
 ```bash
 FEISHU_TENCENT_URL='腾讯数据目标飞书表格链接'

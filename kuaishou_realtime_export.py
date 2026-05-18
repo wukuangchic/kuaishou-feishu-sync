@@ -34,7 +34,7 @@ from typing import Any
 
 DEFAULT_TARGET_URL = "https://ugagent-partner.kuaishou.com/data/center/analyse/agent"
 DIRECT_POST_ENDPOINT = "https://ugagent-partner.kuaishou.com/rest/n/agent/portalReport/downloadExcel"
-DEFAULT_FEISHU_URL = "https://ujumedia.feishu.cn/wiki/SsVAwy1bSiDIaCkBt0ccDlftn0c?sheet=a0545c"
+DEFAULT_FEISHU_URL = ""
 DEFAULT_FEISHU_BASE_URL = "https://open.feishu.cn"
 EXCEL_PATTERNS = ("*.xlsx", "*.xls", "*.csv")
 REALTIME_QUOTA_IDS = [11, 12, 13, 16]
@@ -1200,6 +1200,9 @@ def apply_date_column_styles(
 
 
 def sync_export_file_to_feishu(path: Path, args: argparse.Namespace) -> dict[str, int]:
+    args.feishu_url = (args.feishu_url or "").strip()
+    if not args.feishu_url:
+        raise ChromeAutomationError("Set FEISHU_KS_URL or pass --feishu-url.")
     export_headers, export_records = read_export_table(path)
     client = FeishuSheetClient(args)
     spreadsheet_token, sheet_id = client.resolve_spreadsheet(args.feishu_url)
@@ -1367,7 +1370,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--feishu-url",
         default=os.environ.get("FEISHU_KS_URL") or os.environ.get("FEISHU_URL", DEFAULT_FEISHU_URL),
-        help="target Feishu wiki/sheet URL",
+        help="target Feishu wiki/sheet URL; required unless FEISHU_KS_URL is set",
     )
     parser.add_argument("--feishu-app-id", help="Feishu app id; defaults to FEISHU_APP_ID")
     parser.add_argument("--feishu-app-secret", help="Feishu app secret; defaults to FEISHU_APP_SECRET")

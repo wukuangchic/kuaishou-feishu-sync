@@ -1,12 +1,13 @@
 # 广告数据同步脚本
 
-当前开发版本脚本：`kuaishou_realtime_export.py`
-
-新增腾讯广告账户数据同步程序：
+这个仓库包含两个示例程序：
 
 ```text
+kuaishou_realtime_export.py
 Tencent_web_data/tencent_web_data.py
 ```
+
+`.env.example` 给出了需要的环境变量模板，复制后按需填写本机配置。
 
 腾讯程序说明见：
 
@@ -25,7 +26,7 @@ archive/v1-post-download/
 ## 当前推荐用法
 
 ```bash
-cd "/Users/wukuangchicsmacbook/Library/Mobile Documents/com~apple~CloudDocs/Downloads/腾讯时报测试"
+cd <repo-root>
 ./kuaishou_realtime_export.py --post
 ```
 
@@ -49,11 +50,7 @@ Chrome 需要开启：
 
 ## v2：同步到飞书表格
 
-目标飞书表格：
-
-```text
-https://ujumedia.feishu.cn/wiki/SsVAwy1bSiDIaCkBt0ccDlftn0c?sheet=a0545c
-```
+目标飞书表格通过 `FEISHU_KS_URL` 配置，不在仓库中写死。
 
 同步逻辑：
 
@@ -64,7 +61,7 @@ https://ujumedia.feishu.cn/wiki/SsVAwy1bSiDIaCkBt0ccDlftn0c?sheet=a0545c
 - 飞书没有相同唯一键时，追加到表格尾部
 - `渠道号`、`产品` 保持文本；`日期` 写入为高精度表格日期序列数字，并按最近整点参与去重；其他纯数字指标列按数字写入飞书
 
-飞书应用凭证请使用环境变量，不要写进代码或 README：
+飞书应用凭证请使用环境变量，不要写进代码或 README。复制 `.env.example` 为 `.env` 后再填写：
 
 ```bash
 export FEISHU_APP_ID='你的飞书应用 App ID'
@@ -76,7 +73,7 @@ export FEISHU_KS_URL='快手数据目标飞书表格链接'
 
 ```bash
 ./kuaishou_realtime_export.py \
-  --sync-file "/Users/wukuangchicsmacbook/Library/Mobile Documents/com~apple~CloudDocs/Downloads/实时0518_hour.csv" \
+  --sync-file "./data/实时0518_hour.csv" \
   --sync-dry-run
 ```
 
@@ -84,7 +81,7 @@ export FEISHU_KS_URL='快手数据目标飞书表格链接'
 
 ```bash
 ./kuaishou_realtime_export.py \
-  --sync-file "/Users/wukuangchicsmacbook/Library/Mobile Documents/com~apple~CloudDocs/Downloads/实时0518_hour.csv"
+  --sync-file "./data/实时0518_hour.csv"
 ```
 
 下载后自动同步飞书：

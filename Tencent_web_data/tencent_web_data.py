@@ -44,7 +44,7 @@ from kuaishou_realtime_export import (  # noqa: E402
 
 
 DEFAULT_TARGET_URL = "https://ad.qq.com/cm/account"
-DEFAULT_FEISHU_URL = "https://ujumedia.feishu.cn/wiki/SsVAwy1bSiDIaCkBt0ccDlftn0c?sheet=i7McmQ"
+DEFAULT_FEISHU_URL = ""
 DEFAULT_FEISHU_BASE_URL = "https://open.feishu.cn"
 DEFAULT_DYNAMIC_FIELDS = [
     "marketing_content",
@@ -515,6 +515,9 @@ def apply_date_style(client: FeishuSheetClient, spreadsheet_token: str, sheet_id
 
 
 def sync_records_to_feishu(headers: list[str], records: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, int]:
+    args.feishu_url = (args.feishu_url or "").strip()
+    if not args.feishu_url:
+        raise ChromeAutomationError("Set FEISHU_TENCENT_URL or pass --feishu-url.")
     client = FeishuSheetClient(args)
     spreadsheet_token, sheet_id = client.resolve_spreadsheet(args.feishu_url)
     sheet_info = client.get_sheet_info(spreadsheet_token, sheet_id)
@@ -622,7 +625,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--feishu-url",
         default=os.environ.get("FEISHU_TENCENT_URL", DEFAULT_FEISHU_URL),
-        help="target Feishu wiki/sheet URL; defaults to FEISHU_TENCENT_URL",
+        help="target Feishu wiki/sheet URL; required unless FEISHU_TENCENT_URL is set",
     )
     parser.add_argument("--feishu-app-id", help="Feishu app id; defaults to FEISHU_APP_ID")
     parser.add_argument("--feishu-app-secret", help="Feishu app secret; defaults to FEISHU_APP_SECRET")

@@ -7,7 +7,7 @@
 ## 当前推荐用法
 
 ```bash
-cd "/Users/wukuangchicsmacbook/Library/Mobile Documents/com~apple~CloudDocs/Downloads/腾讯时报测试"
+cd <repo-root>
 ./kuaishou_realtime_export.py --post
 ```
 
