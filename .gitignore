@@ -5,4 +5,5 @@
 kuaishou_cookie.txt
 feishu_cookie.txt
 feishu_secret.txt
+feishu_image*.png
 __pycache__/

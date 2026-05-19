@@ -35,6 +35,7 @@ from kuaishou_realtime_export import (  # noqa: E402
     column_letter,
     datetime_to_spreadsheet_serial,
     execute_js,
+    export_feishu_used_range_image,
     find_tab,
     get_grid_count,
     load_dotenv,
@@ -871,6 +872,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("FEISHU_TENCENT_URL", DEFAULT_FEISHU_URL),
         help="target Feishu wiki/sheet URL; required unless FEISHU_TENCENT_URL is set",
     )
+    parser.add_argument(
+        "--feishu-image",
+        action="store_true",
+        help="render the used range from FEISHU_IMAGE_URL to a PNG image and exit",
+    )
+    parser.add_argument(
+        "--feishu-image-url",
+        default=os.environ.get("FEISHU_IMAGE_URL", ""),
+        help="source Feishu wiki/sheet URL for --feishu-image; defaults to FEISHU_IMAGE_URL",
+    )
+    parser.add_argument(
+        "--feishu-image-output",
+        help="output PNG path for --feishu-image; defaults to ./feishu_image_<range>_<timestamp>.png",
+    )
     parser.add_argument("--feishu-app-id", help="Feishu app id; defaults to FEISHU_APP_ID")
     parser.add_argument("--feishu-app-secret", help="Feishu app secret; defaults to FEISHU_APP_SECRET")
     parser.add_argument(
@@ -899,6 +914,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.feishu_image:
+        export_feishu_used_range_image(args)
+        return 0
+
     try:
         dt.datetime.strptime(args.date, "%Y-%m-%d")
     except ValueError as exc:

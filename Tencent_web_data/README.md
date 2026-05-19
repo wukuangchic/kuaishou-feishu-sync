@@ -67,6 +67,7 @@ export TENCENT_COOKIE='从浏览器复制出来的 Cookie 字符串'
 
 ```bash
 FEISHU_TENCENT_URL='腾讯数据目标飞书表格链接'
+FEISHU_IMAGE_URL='需要截图输出的飞书表格链接'
 FEISHU_APP_ID='飞书应用 App ID'
 FEISHU_APP_SECRET='飞书应用 App Secret'
 TENCENT_COOKIE='可选：直连模式 Cookie'
@@ -86,6 +87,12 @@ TENCENT_COOKIE='可选：直连模式 Cookie'
 
 ```bash
 ./Tencent_web_data/tencent_web_data.py --no-sync
+```
+
+只输出 `FEISHU_IMAGE_URL` 对应工作表的有效数据区域截图：
+
+```bash
+./Tencent_web_data/tencent_web_data.py --feishu-image
 ```
 
 指定日期：

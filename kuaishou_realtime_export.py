@@ -1228,6 +1228,178 @@ def trim_trailing_empty_rows(values: list[list[str]]) -> list[list[str]]:
     return trimmed
 
 
+def used_range_for_values(values: list[list[str]]) -> tuple[str, list[list[str]]]:
+    min_row: int | None = None
+    min_col: int | None = None
+    max_row = 0
+    max_col = 0
+    for row_index, row in enumerate(values, start=1):
+        for col_index, cell in enumerate(row, start=1):
+            if not str(cell or "").strip():
+                continue
+            min_row = row_index if min_row is None else min(min_row, row_index)
+            min_col = col_index if min_col is None else min(min_col, col_index)
+            max_row = max(max_row, row_index)
+            max_col = max(max_col, col_index)
+    if min_row is None or min_col is None:
+        raise ChromeAutomationError("Feishu image sheet has no non-empty cells.")
+
+    width = max_col - min_col + 1
+    used_values: list[list[str]] = []
+    for row in values[min_row - 1 : max_row]:
+        cells = row[min_col - 1 : max_col] if len(row) >= min_col else []
+        used_values.append(cells + [""] * (width - len(cells)))
+    used_range = f"{column_letter(min_col)}{min_row}:{column_letter(max_col)}{max_row}"
+    return used_range, used_values
+
+
+def image_text_width(draw: Any, text: str, font: Any) -> int:
+    left, _, right, _ = draw.textbbox((0, 0), text or " ", font=font)
+    return int(right - left)
+
+
+def fit_text_with_ellipsis(draw: Any, text: str, font: Any, max_width: int) -> str:
+    suffix = "..."
+    if image_text_width(draw, text, font) <= max_width:
+        return text
+    while text and image_text_width(draw, text + suffix, font) > max_width:
+        text = text[:-1]
+    return (text + suffix) if text else suffix
+
+
+def wrap_image_text(draw: Any, text: str, font: Any, max_width: int, max_lines: int = 4) -> list[str]:
+    wrapped: list[str] = []
+    for paragraph in (str(text or "").replace("\r", "\n").split("\n") or [""]):
+        current = ""
+        for char in paragraph:
+            candidate = current + char
+            if not current or image_text_width(draw, candidate, font) <= max_width:
+                current = candidate
+                continue
+            wrapped.append(current)
+            current = char
+        wrapped.append(current)
+    if len(wrapped) > max_lines:
+        wrapped = wrapped[:max_lines]
+        wrapped[-1] = fit_text_with_ellipsis(draw, wrapped[-1], font, max_width)
+    return wrapped or [""]
+
+
+def load_sheet_image_font(size: int, *, bold: bool = False) -> Any:
+    from PIL import ImageFont
+
+    candidates = (
+        "/System/Library/Fonts/STHeiti Medium.ttc" if bold else "/System/Library/Fonts/STHeiti Light.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+    )
+    for font_path in candidates:
+        if not Path(font_path).exists():
+            continue
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def render_values_to_png(values: list[list[str]], output_path: Path) -> None:
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as exc:
+        raise ChromeAutomationError("Feishu image export needs Pillow: python3 -m pip install Pillow") from exc
+
+    if not values:
+        raise ChromeAutomationError("Feishu image export has no values to render.")
+
+    column_count = max(len(row) for row in values)
+    normalized_values = [row + [""] * (column_count - len(row)) for row in values]
+    body_font = load_sheet_image_font(14)
+    scratch = Image.new("RGB", (1, 1), "white")
+    draw = ImageDraw.Draw(scratch)
+    padding_x = 12
+    padding_y = 9
+    min_col_width = 78
+    max_col_width = 260
+    _, text_top, _, text_bottom = draw.textbbox((0, 0), "Ag测试", font=body_font)
+    line_height = max(18, text_bottom - text_top + 5)
+
+    col_widths: list[int] = []
+    for col_index in range(column_count):
+        widest = 0
+        for row in normalized_values:
+            for part in (str(row[col_index] or "").splitlines() or [""]):
+                widest = max(widest, image_text_width(draw, part, body_font))
+        col_widths.append(max(min_col_width, min(max_col_width, widest + padding_x * 2)))
+
+    wrapped_rows: list[list[list[str]]] = []
+    row_heights: list[int] = []
+    for row in normalized_values:
+        wrapped_cells: list[list[str]] = []
+        row_height = 0
+        for col_index, cell in enumerate(row):
+            max_text_width = col_widths[col_index] - padding_x * 2
+            lines = wrap_image_text(draw, str(cell or ""), body_font, max_text_width)
+            wrapped_cells.append(lines)
+            row_height = max(row_height, len(lines) * line_height + padding_y * 2)
+        wrapped_rows.append(wrapped_cells)
+        row_heights.append(max(34, row_height))
+
+    image_width = sum(col_widths) + 1
+    image_height = sum(row_heights) + 1
+    image = Image.new("RGB", (image_width, image_height), "#ffffff")
+    draw = ImageDraw.Draw(image)
+    grid_color = "#dfe3eb"
+    text_color = "#1f2329"
+
+    y = 0
+    for row_index, cells in enumerate(wrapped_rows):
+        x = 0
+        for col_index, lines in enumerate(cells):
+            width = col_widths[col_index]
+            height = row_heights[row_index]
+            draw.rectangle((x, y, x + width, y + height), fill="#ffffff", outline=grid_color)
+            text_y = y + max(padding_y, (height - len(lines) * line_height) // 2)
+            for line in lines:
+                draw.text((x + padding_x, text_y), line, fill=text_color, font=body_font)
+                text_y += line_height
+            x += width
+        y += row_heights[row_index]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path)
+
+
+def default_feishu_image_output_path(used_range: str) -> Path:
+    safe_range = re.sub(r"[^A-Za-z0-9]+", "_", used_range).strip("_")
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Path(f"feishu_image_{safe_range}_{stamp}.png").resolve()
+
+
+def export_feishu_used_range_image(args: argparse.Namespace) -> dict[str, str]:
+    feishu_url = (args.feishu_image_url or "").strip()
+    if not feishu_url:
+        raise ChromeAutomationError("Set FEISHU_IMAGE_URL or pass --feishu-image-url.")
+    client = FeishuSheetClient(args)
+    spreadsheet_token, sheet_id = client.resolve_spreadsheet(feishu_url)
+    sheet_info = client.get_sheet_info(spreadsheet_token, sheet_id)
+    row_count = get_grid_count(sheet_info, "row_count", 200)
+    col_count = get_grid_count(sheet_info, "column_count", 26)
+    values = client.read_values(spreadsheet_token, sheet_id, col_count, row_count)
+    used_range, used_values = used_range_for_values(values)
+    output_path = (
+        Path(args.feishu_image_output).expanduser().resolve()
+        if args.feishu_image_output
+        else default_feishu_image_output_path(used_range)
+    )
+    render_values_to_png(used_values, output_path)
+    full_range = f"{sheet_id}!{used_range}"
+    print(f"Feishu image target: spreadsheet={spreadsheet_token} sheet={sheet_id}")
+    print(f"Used range: {full_range}")
+    print(f"Image written: {output_path}")
+    return {"range": full_range, "output": str(output_path)}
+
+
 def build_existing_index(
     existing_values: list[list[str]],
     headers: list[str],
@@ -1476,6 +1648,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("FEISHU_KS_URL") or os.environ.get("FEISHU_URL", DEFAULT_FEISHU_URL),
         help="target Feishu wiki/sheet URL; required unless FEISHU_KS_URL is set",
     )
+    parser.add_argument(
+        "--feishu-image",
+        action="store_true",
+        help="render the used range from FEISHU_IMAGE_URL to a PNG image and exit",
+    )
+    parser.add_argument(
+        "--feishu-image-url",
+        default=os.environ.get("FEISHU_IMAGE_URL", ""),
+        help="source Feishu wiki/sheet URL for --feishu-image; defaults to FEISHU_IMAGE_URL",
+    )
+    parser.add_argument(
+        "--feishu-image-output",
+        help="output PNG path for --feishu-image; defaults to ./feishu_image_<range>_<timestamp>.png",
+    )
     parser.add_argument("--feishu-app-id", help="Feishu app id; defaults to FEISHU_APP_ID")
     parser.add_argument("--feishu-app-secret", help="Feishu app secret; defaults to FEISHU_APP_SECRET")
     parser.add_argument(
@@ -1561,6 +1747,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.feishu_image:
+        export_feishu_used_range_image(args)
+        return 0
+
     download_dir = Path(args.download_dir).expanduser().resolve() if args.download_dir else guess_chrome_download_dir()
     delay_after_query = max(2.0, args.delay_after_query)
 

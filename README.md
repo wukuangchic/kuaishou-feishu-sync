@@ -80,6 +80,7 @@ Chrome 需要开启：
 export FEISHU_APP_ID='你的飞书应用 App ID'
 export FEISHU_APP_SECRET='你的飞书应用 App Secret'
 export FEISHU_KS_URL='快手数据目标飞书表格链接'
+export FEISHU_IMAGE_URL='需要截图输出的飞书表格链接'
 ```
 
 先用本地已下载文件做同步预演：
@@ -101,6 +102,18 @@ export FEISHU_KS_URL='快手数据目标飞书表格链接'
 
 ```bash
 ./kuaishou_realtime_export.py --post --sync-feishu
+```
+
+把 `FEISHU_IMAGE_URL` 指向的工作表有效数据区域输出为 PNG：
+
+```bash
+./kuaishou_realtime_export.py --feishu-image
+```
+
+脚本会自动扫描非空单元格，得到类似 `A1:F8` 的范围后截图输出；如需指定文件名：
+
+```bash
+./kuaishou_realtime_export.py --feishu-image --feishu-image-output ./feishu_image.png
 ```
 
 当前验证结果：
@@ -209,6 +222,8 @@ export KUAISHOU_COOKIE='从浏览器复制出来的 Cookie 字符串'
 - `--sync-file PATH`：跳过下载，直接把本地导出文件同步到飞书
 - `--sync-dry-run`：只生成同步计划，不写入飞书
 - `--feishu-url URL`：目标飞书表格链接，默认读取 `FEISHU_KS_URL`；兼容旧变量 `FEISHU_URL`
+- `--feishu-image`：读取 `FEISHU_IMAGE_URL`，把有效数据区域输出为 PNG
+- `--feishu-image-output PATH`：指定 `--feishu-image` 的 PNG 输出路径
 - `--feishu-ca-file PATH`：指定 Feishu HTTPS CA bundle
 - `--feishu-insecure`：关闭 Feishu HTTPS 证书校验，仅用于本地证书排查
 - `--product-id ID`：产品筛选，可重复
